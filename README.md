@@ -1,6 +1,6 @@
 # ThoughtGraph · Agent Memory MCP server
 
-> [AI 能帮助你实现，但是不能替代你思考](https://xlisp.github.io/posts/why-you-not-student.html)
+> [AI 能帮助你实现，但是不能替代你思考](https://xlisp.github.io/posts/why-you-not-student.html);  
 > 大脑里放不下太多节点 —— 把它们倒进图里，让思考可计算、可回溯、可成环。
 
 一个用 **Rust + Tauri 2 + SQLite** 写的 macOS 桌面应用，把"评论 / 回复"建模成有向图，
