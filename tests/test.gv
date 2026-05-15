@@ -1,0 +1,9 @@
+digraph "Q2 战略复盘" {
+  rankdir=LR;
+  n1 [label="root\n核心问题：用户留存为什么下降？"];
+  n2 [label="hypo-A\n是不是 onboarding 太长？"];
+  n3 [label="data-1\n抽样显示完成率 41%"];
+  n1 -> n2 [arrowhead=vee];
+  n2 -> n3 [arrowhead=vee];
+  n3 -> n1 [arrowhead=vee, style=dashed, color="#cc5555", constraint=false];  // ⟲ 回到 root
+}
