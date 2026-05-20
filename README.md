@@ -161,10 +161,14 @@ graphviz-comment-reply/
 │       ├── graph.rs            # DOT 渲染、dot 进程调用、BFS 路径搜索
 │       └── commands.rs         # Tauri command 包装
 ├── mcp-server/                 # MCP server（共享同一 SQLite）
-└── web-server/                 # Web 版（跨平台 HTTP 服务，复用 db.rs / graph.rs）
-    ├── Cargo.toml
-    └── src/main.rs             # tiny_http + 单端点 POST /api/invoke 分派
-# 配套的 Web 前端在仓库根的 web-src/，与 src/ 平级
+├── web-server/                 # Web 版后端（Rust，跨平台 HTTP；复用 db.rs / graph.rs）
+│   ├── Cargo.toml
+│   └── src/main.rs             # tiny_http + 单端点 POST /api/invoke 分派
+├── web-py/                     # Web 版后端（纯 Python，零编译；受限 Windows 用）
+│   ├── server.py               # 镜像 web-server 的 dispatch / db / graph
+│   ├── run.bat                 # Windows 启动
+│   └── run.sh                  # Linux / macOS 启动
+└── web-src/                    # Web 版前端（与桌面端 src/ 同源，仅 invoke 改 fetch）
 ```
 
 ---
@@ -290,6 +294,44 @@ curl -X POST http://127.0.0.1:8888/api/invoke \
 set DOT_BIN=C:\Program Files\Graphviz\bin\dot.exe
 cargo run -p thoughtgraph-web --release
 ```
+
+### 8.6 纯 Python 版（无需编译，给受限 Windows 用）
+
+如果公司电脑因为安全策略**不允许编译生成 .exe**（典型报错：`link.exe` 报错、
+没装 MSVC build tools、AV 拦截链接器），用 `web-py/` 下的纯 Python 版本：
+
+- 不需要 Rust、不需要 Node、不需要 MSVC，只要装好 **Python 3.9+**（Microsoft Store
+  搜 "Python 3" 免管理员安装亦可）和 **GraphViz**。
+- 全部用 Python 标准库写（`http.server` + `sqlite3` + `subprocess`），**不产生任何
+  二进制文件**，只跑 `.py` 源码。
+- 后端逻辑完全镜像 Rust 版：相同的 SQLite schema、相同的 DOT 渲染、相同的路径
+  搜索语义；前端 `web-src/` 一字不改地复用。**SQLite 数据库文件与 Rust 版兼容**。
+
+启动：
+
+```cmd
+cd path\to\thought-graph\web-py
+run.bat
+```
+
+或手动：
+
+```cmd
+python server.py
+```
+
+Linux / macOS：
+
+```bash
+cd thought-graph/web-py
+./run.sh
+```
+
+环境变量与 Rust 版完全一致（`HOST`、`PORT`、`THOUGHTGRAPH_DATA_DIR`、
+`THOUGHTGRAPH_DB`、`THOUGHTGRAPH_WEB_SRC`、`DOT_BIN`）。
+
+数据库默认路径也一致，所以 **Rust web 版**、**Python web 版**、**桌面 Tauri 版**
+可以指向同一个 SQLite 文件互通（用 `THOUGHTGRAPH_DB` 显式指定）。
 
 ---
 
