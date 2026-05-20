@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ThoughtGraph (Web)</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <h1>ThoughtGraph</h1>
+          <button id="new-graph-btn" title="New graph">+</button>
+        </div>
+        <ul id="graph-list" class="graph-list"></ul>
+        <div class="sidebar-foot">
+          <small>Web edition · data stored on the server</small>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button id="toggle-sidebar" class="toggle-btn" title="Hide / show graphs sidebar">◀</button>
+          <div class="title-area">
+            <h2 id="graph-title">Pick or create a graph</h2>
+            <p id="graph-desc" class="muted"></p>
+          </div>
+          <div class="toolbar">
+            <button id="rename-graph">Rename</button>
+            <button id="export-gv">Export .gv</button>
+            <button id="render-pdf">Render → PDF</button>
+            <button id="render-svg">Render → SVG</button>
+            <button id="delete-graph" class="danger">Delete</button>
+            <button id="toggle-pathpane" class="toggle-btn" title="Hide / show path search">▶</button>
+          </div>
+        </header>
+
+        <section class="panes">
+          <!-- ===== NODES (unified tree with inline actions) ===== -->
+          <div class="pane nodes-pane">
+            <div class="pane-head">
+              <h3>Nodes</h3>
+              <button id="new-root" class="primary">+ New comment</button>
+            </div>
+            <div class="filter-row">
+              <input id="content-search" type="search" placeholder="Search content (space = AND)…" />
+              <span id="search-count" class="muted"></span>
+            </div>
+            <ul id="nodes-tree" class="tree"></ul>
+          </div>
+
+          <!-- ===== PATH SEARCH (keyword DFS) ===== -->
+          <div class="pane search-pane" id="search-pane">
+            <div class="pane-head"><h3>Thinking path search</h3></div>
+            <div class="search-form">
+              <label>
+                From keyword
+                <input id="from-input" placeholder="e.g. login, 安全…" autocomplete="off" />
+              </label>
+              <label>
+                To keyword
+                <input id="to-input" placeholder="e.g. token, 审计…" autocomplete="off" />
+              </label>
+              <button id="search-paths" class="primary">Find paths</button>
+            </div>
+            <p class="muted small">
+              DFS enumerates every <b>directed</b> path from any node matching
+              <b>From</b> to any node matching <b>To</b>. Match is case-insensitive
+              substring on content or <code>app_id</code>.
+            </p>
+            <div id="path-results" class="path-results"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- modal -->
+    <div id="modal" class="modal hidden">
+      <div class="modal-card">
+        <h3 id="modal-title">Title</h3>
+        <div id="modal-body"></div>
+        <div class="modal-actions">
+          <button id="modal-cancel">Cancel</button>
+          <button id="modal-ok" class="primary">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
