@@ -115,6 +115,63 @@ function openExport(url) {
 }
 
 // ============================================================================
+// in-browser Graphviz rendering via vendored Viz.js (WASM build of `dot`).
+//
+// Why: corporate boxes may forbid installing GraphViz system-wide. Viz.js is
+// vendored under web-src/vendor/viz-standalone.js, runs entirely in the
+// browser, and produces SVG. No `dot` binary, no network at runtime.
+// ============================================================================
+
+let _vizInstancePromise = null;
+function getViz() {
+  if (!_vizInstancePromise) {
+    if (typeof Viz === "undefined" || !Viz.instance) {
+      return Promise.reject(new Error(
+        "Viz.js failed to load. Make sure web-src/vendor/viz-standalone.js exists."
+      ));
+    }
+    _vizInstancePromise = Viz.instance();
+  }
+  return _vizInstancePromise;
+}
+
+// Render a DOT source string and open it in a new tab as an SVG document.
+// The new tab is suitable for browser File → Print → Save as PDF.
+async function renderDotInNewTab(dot, titleHint) {
+  const viz = await getViz();
+  // renderString throws on malformed DOT; let it propagate so the caller can alert().
+  const svg = viz.renderString(dot, { format: "svg" });
+  // Wrap in a minimal HTML doc so the SVG fills the viewport and is printable.
+  const safeTitle = (titleHint || "ThoughtGraph").replace(/[<>&]/g, "");
+  const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#fafafa;font-family:system-ui,sans-serif}
+  .bar{position:fixed;top:0;left:0;right:0;padding:6px 10px;background:#fff;border-bottom:1px solid #ddd;display:flex;gap:8px;align-items:center;font-size:12px;z-index:10}
+  .bar button,.bar a{padding:3px 10px;border:1px solid #bbb;background:#fff;border-radius:4px;cursor:pointer;text-decoration:none;color:#1f2330;font:inherit}
+  .stage{padding:44px 12px 12px;min-height:calc(100% - 56px);overflow:auto}
+  svg{max-width:100%;height:auto;display:block;margin:0 auto;background:#fafafa}
+  @media print { .bar{display:none} .stage{padding:0} }
+</style></head><body>
+<div class="bar">
+  <b>${safeTitle}</b>
+  <button onclick="window.print()">Print / Save as PDF</button>
+  <a id="dl-svg" download="${safeTitle}.svg">Download SVG</a>
+</div>
+<div class="stage" id="stage"></div>
+<script>
+  document.getElementById('stage').innerHTML = ${JSON.stringify(svg)};
+  const blob = new Blob([${JSON.stringify(svg)}], {type: 'image/svg+xml'});
+  document.getElementById('dl-svg').href = URL.createObjectURL(blob);
+</script>
+</body></html>`;
+  const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank", "noopener");
+  // Free the URL after the new tab has had time to load.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// ============================================================================
 // modal
 // ============================================================================
 
@@ -554,24 +611,15 @@ $("#export-gv").onclick = async () => {
   } catch (e) { alert(e); }
 };
 
-$("#render-pdf").onclick = async () => {
-  if (!state.currentGraph) return;
-  const btn = $("#render-pdf");
-  const orig = btn.textContent; btn.disabled = true; btn.textContent = "Rendering…";
-  try {
-    const r = await invoke("render_and_open", { graphId: state.currentGraph.id, format: "pdf" });
-    openExport(r.image_url);
-  } catch (e) { alert(e); }
-  finally { btn.disabled = false; btn.textContent = orig; }
-};
-
+// Render the current graph entirely in the browser via vendored Viz.js. The
+// server only returns the DOT source string — no `dot` binary needed.
 $("#render-svg").onclick = async () => {
   if (!state.currentGraph) return;
   const btn = $("#render-svg");
   const orig = btn.textContent; btn.disabled = true; btn.textContent = "Rendering…";
   try {
-    const r = await invoke("render_and_open", { graphId: state.currentGraph.id, format: "svg" });
-    openExport(r.image_url);
+    const dot = await invoke("preview_dot", { graphId: state.currentGraph.id });
+    await renderDotInNewTab(dot, state.currentGraph.name);
   } catch (e) { alert(e); }
   finally { btn.disabled = false; btn.textContent = orig; }
 };
@@ -652,14 +700,13 @@ function renderPathResults({ fromKw, toKw, hits }) {
       const origText = openBtn.textContent;
       openBtn.textContent = "Rendering…";
       try {
-        const r = await invoke("render_paths_by_keyword_and_open", {
+        const dot = await invoke("preview_paths_dot_by_keyword", {
           graphId: state.currentGraph.id,
           fromKeyword: fromKw,
           toKeyword: toKw,
           maxPaths: MAX_PATHS,
-          format: "svg",
         });
-        openExport(r.image_url);
+        await renderDotInNewTab(dot, `${state.currentGraph.name} — paths`);
       } catch (e) { alert(e); }
       finally { openBtn.disabled = false; openBtn.textContent = origText; }
     };

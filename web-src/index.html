@@ -29,8 +29,7 @@
           <div class="toolbar">
             <button id="rename-graph">Rename</button>
             <button id="export-gv">Export .gv</button>
-            <button id="render-pdf">Render → PDF</button>
-            <button id="render-svg">Render → SVG</button>
+            <button id="render-svg" title="Render in browser (no GraphViz required)">Render</button>
             <button id="delete-graph" class="danger">Delete</button>
             <button id="toggle-pathpane" class="toggle-btn" title="Hide / show path search">▶</button>
           </div>
@@ -87,6 +86,9 @@
       </div>
     </div>
 
+    <!-- Vendored Viz.js (WASM Graphviz). Loaded as a classic script so it
+         exposes the global `Viz` object before main.js (an ES module) runs. -->
+    <script src="vendor/viz-standalone.js"></script>
     <script type="module" src="main.js"></script>
   </body>
 </html>

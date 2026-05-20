@@ -212,10 +212,13 @@ A: 直接复制 `~/Library/Application Support/com.chanshunli.thoughtgraph/thoug
 | 依赖 | 说明 |
 | --- | --- |
 | Rust | 1.77+（`rustup` 装好即可） |
-| GraphViz | 装好 `dot`：Windows 去 <https://graphviz.org/download/>；Linux `apt install graphviz` |
+| GraphViz | **可选**。装了 `dot` 就走系统二进制（更快）；没装也行，前端自带 Viz.js（WASM Graphviz）走浏览器渲染 |
 | 浏览器 | 任意现代浏览器 |
 
-无需 Node.js / Tauri CLI / Xcode。
+无需 Node.js / Tauri CLI / Xcode。前端 `web-src/vendor/viz-standalone.js`
+是 Viz.js 3.14.0（WASM 移植的 Graphviz，约 1.4MB），点 **Render** 按钮时在浏览器里
+直接把 DOT 渲成 SVG，新开标签页里用浏览器原生「打印 / 另存为 PDF」即可得到 PDF。
+**整个链路无需任何系统级 `dot` 二进制。**
 
 ### 8.2 启动
 
@@ -278,7 +281,8 @@ curl -X POST http://127.0.0.1:8888/api/invoke \
 ### 8.5 Windows 一键跑
 
 1. 装 Rust：<https://rustup.rs>
-2. 装 GraphViz：<https://graphviz.org/download/>，安装时勾选"Add to PATH"
+2. *（可选）* 装 GraphViz：<https://graphviz.org/download/>，安装时勾选"Add to PATH"。
+   不装也行 —— 浏览器侧的 Viz.js 会兜底渲染。
 3. `git clone` 本仓库
 4. 在仓库根目录执行：
 
@@ -288,23 +292,26 @@ curl -X POST http://127.0.0.1:8888/api/invoke \
 
 5. 浏览器打开 `http://127.0.0.1:8888`
 
-如果 `dot` 不在 PATH，加一个环境变量再跑：
+如果装了 `dot` 但不在 PATH，加一个环境变量再跑：
 
 ```cmd
 set DOT_BIN=C:\Program Files\Graphviz\bin\dot.exe
 cargo run -p thoughtgraph-web --release
 ```
 
-### 8.6 纯 Python 版（无需编译，给受限 Windows 用）
+### 8.6 纯 Python 版（无需编译，无需 GraphViz —— 给受限 Windows 用）
 
 如果公司电脑因为安全策略**不允许编译生成 .exe**（典型报错：`link.exe` 报错、
-没装 MSVC build tools、AV 拦截链接器），用 `web-py/` 下的纯 Python 版本：
+没装 MSVC build tools、AV 拦截链接器）、**也装不了 GraphViz**，用 `web-py/` 下的
+纯 Python 版本 + 前端自带的 Viz.js（WASM）即可：
 
-- 不需要 Rust、不需要 Node、不需要 MSVC，只要装好 **Python 3.9+**（Microsoft Store
-  搜 "Python 3" 免管理员安装亦可）和 **GraphViz**。
-- 全部用 Python 标准库写（`http.server` + `sqlite3` + `subprocess`），**不产生任何
-  二进制文件**，只跑 `.py` 源码。
-- 后端逻辑完全镜像 Rust 版：相同的 SQLite schema、相同的 DOT 渲染、相同的路径
+- 不需要 Rust、不需要 Node、不需要 MSVC、**不需要 GraphViz**，只要装好 **Python 3.9+**
+  （Microsoft Store 搜 "Python 3" 免管理员安装亦可）。
+- 全部用 Python 标准库写（`http.server` + `sqlite3`），**不产生任何二进制文件**，
+  只跑 `.py` 源码。
+- 渲染走前端 Viz.js（`web-src/vendor/viz-standalone.js`，WASM 移植的 Graphviz），
+  浏览器内直接生成 SVG；想要 PDF 就用浏览器的「打印 / 另存为 PDF」。
+- 后端逻辑完全镜像 Rust 版：相同的 SQLite schema、相同的 DOT 输出、相同的路径
   搜索语义；前端 `web-src/` 一字不改地复用。**SQLite 数据库文件与 Rust 版兼容**。
 
 启动：

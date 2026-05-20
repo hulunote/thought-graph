@@ -741,6 +741,25 @@ def dispatch(cmd: str, args: dict) -> Any:
         if cmd == "preview_dot":
             gid = args["graphId"]
             return render_dot(_graph_name(gid), db_list_nodes(gid), db_list_edges(gid))
+        if cmd == "preview_paths_dot":
+            # DOT-only render of a `find_paths` result — no `dot` subprocess.
+            # Lets the browser render via viz.js so the server can run on a
+            # box without GraphViz installed.
+            gid = args["graphId"]
+            paths = find_paths(
+                gid, args["fromAppId"], args["toAppId"], int(args.get("maxPaths") or 10),
+            )
+            if not paths:
+                raise ValueError("No paths — the two nodes are not connected.")
+            return render_paths_dot(_graph_name(gid), paths)
+        if cmd == "preview_paths_dot_by_keyword":
+            gid = args["graphId"]
+            paths = find_paths_by_keyword(
+                gid, args["fromKeyword"], args["toKeyword"], int(args.get("maxPaths") or 50),
+            )
+            if not paths:
+                raise ValueError("No paths found for those keywords.")
+            return render_paths_dot(_graph_name(gid), paths)
         if cmd == "export_gv":
             gid = args["graphId"]
             name = _graph_name(gid)

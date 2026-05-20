@@ -386,6 +386,31 @@ fn dispatch(state: &DbState, cmd: &str, args: Value) -> Result<Value> {
             let edges = db::list_edges(&conn, a.graph_id)?;
             Ok(Value::String(graph::render_dot(&g_name, &nodes, &edges)))
         }
+        // DOT-only path renderers — for browsers running viz.js client-side
+        // (no `dot` subprocess required, so the server box doesn't need
+        // GraphViz installed).
+        "preview_paths_dot" => {
+            let a: FindPathsArgs = serde_json::from_value(args)?;
+            let g_name = graph_name_for(&conn, a.graph_id)?;
+            let paths = graph::find_paths(
+                &conn, a.graph_id, &a.from_app_id, &a.to_app_id, a.max_paths.unwrap_or(10),
+            )?;
+            if paths.is_empty() {
+                return Err(anyhow!("No paths — the two nodes are not connected."));
+            }
+            Ok(Value::String(graph::render_paths_dot(&g_name, &paths)))
+        }
+        "preview_paths_dot_by_keyword" => {
+            let a: FindPathsKwArgs = serde_json::from_value(args)?;
+            let g_name = graph_name_for(&conn, a.graph_id)?;
+            let paths = graph::find_paths_by_keyword(
+                &conn, a.graph_id, &a.from_keyword, &a.to_keyword, a.max_paths.unwrap_or(50),
+            )?;
+            if paths.is_empty() {
+                return Err(anyhow!("No paths found for those keywords."));
+            }
+            Ok(Value::String(graph::render_paths_dot(&g_name, &paths)))
+        }
         "export_gv" => {
             let a: GraphRefArgs = serde_json::from_value(args)?;
             let g_name = graph_name_for(&conn, a.graph_id)?;
