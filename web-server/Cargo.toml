@@ -1,0 +1,20 @@
+[package]
+name = "thoughtgraph-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Cross-platform HTTP server for ThoughtGraph (Windows/Linux/macOS web edition)"
+
+[[bin]]
+name = "thoughtgraph-web"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+graphviz-comment-reply = { path = "../src-tauri" }
+tiny_http = "0.12"
+dirs = "5"
