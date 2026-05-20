@@ -144,22 +144,27 @@ digraph "Q2 战略复盘" {
 ```
 graphviz-comment-reply/
 ├── package.json                # @tauri-apps/cli
-├── src/                        # 前端（纯 HTML/CSS/JS，无构建步骤）
+├── src/                        # 桌面端前端（Tauri，纯 HTML/CSS/JS，无构建步骤）
 │   ├── index.html
 │   ├── styles.css
 │   └── main.js
-└── src-tauri/                  # Rust + Tauri 2 后端
+├── src-tauri/                  # Rust + Tauri 2 后端
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   ├── build.rs
+│   ├── capabilities/default.json
+│   ├── icons/...
+│   └── src/
+│       ├── main.rs             # 入口
+│       ├── lib.rs              # Tauri Builder、插件注册、command 列表
+│       ├── db.rs               # SQLite schema 与 CRUD
+│       ├── graph.rs            # DOT 渲染、dot 进程调用、BFS 路径搜索
+│       └── commands.rs         # Tauri command 包装
+├── mcp-server/                 # MCP server（共享同一 SQLite）
+└── web-server/                 # Web 版（跨平台 HTTP 服务，复用 db.rs / graph.rs）
     ├── Cargo.toml
-    ├── tauri.conf.json
-    ├── build.rs
-    ├── capabilities/default.json
-    ├── icons/...
-    └── src/
-        ├── main.rs             # 入口
-        ├── lib.rs              # Tauri Builder、插件注册、command 列表
-        ├── db.rs               # SQLite schema 与 CRUD
-        ├── graph.rs            # DOT 渲染、dot 进程调用、BFS 路径搜索
-        └── commands.rs         # Tauri command 包装
+    └── src/main.rs             # tiny_http + 单端点 POST /api/invoke 分派
+# 配套的 Web 前端在仓库根的 web-src/，与 src/ 平级
 ```
 
 ---
@@ -185,7 +190,110 @@ A: 直接复制 `~/Library/Application Support/com.chanshunli.thoughtgraph/thoug
 
 ---
 
-## 8. MCP server（图记忆中心）
+## 8. Web 版本（Windows / Linux / 远程访问）
+
+`web-server/` 是一个独立的 Rust 二进制 `thoughtgraph-web`，把 Tauri 桌面端的全部
+后端能力（`db.rs` / `graph.rs`）原样复用，**用 HTTP 暴露出来**，配合 `web-src/`
+里的纯前端（HTML/CSS/JS）在浏览器里使用。专门用于：
+
+- 公司里跑不了 Tauri 工具链的 **Windows** 电脑
+- 想把 ThoughtGraph 装在一台 NAS / 服务器上**远程访问**的场景
+
+**与桌面版的关系**：完全独立。共享 `src-tauri/` 里的 `db` 和 `graph` 两个 crate 模块
+（通过 path 依赖），所以 schema、DOT 渲染、路径搜索全部一致；SQLite 文件可互通。
+不会动到桌面端任何代码。
+
+### 8.1 环境要求
+
+| 依赖 | 说明 |
+| --- | --- |
+| Rust | 1.77+（`rustup` 装好即可） |
+| GraphViz | 装好 `dot`：Windows 去 <https://graphviz.org/download/>；Linux `apt install graphviz` |
+| 浏览器 | 任意现代浏览器 |
+
+无需 Node.js / Tauri CLI / Xcode。
+
+### 8.2 启动
+
+```bash
+cargo run -p thoughtgraph-web --release
+
+# 或者编译后直接跑：
+cargo build -p thoughtgraph-web --release
+./target/release/thoughtgraph-web         # Linux / macOS
+./target/release/thoughtgraph-web.exe     # Windows
+```
+
+启动后会打印类似：
+
+```
+ThoughtGraph Web server
+  database : C:\Users\<you>\AppData\Roaming\thoughtgraph\thoughtgraph.sqlite3
+  exports  : C:\Users\<you>\AppData\Roaming\thoughtgraph\exports
+  web-src  : <repo>\web-src
+  listen   : http://127.0.0.1:8888
+
+Open http://127.0.0.1:8888 in your browser.
+```
+
+打开浏览器访问 `http://127.0.0.1:8888` 即可使用，UI 与桌面版一致。
+
+### 8.3 环境变量
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `HOST` | `127.0.0.1` | 监听地址；改成 `0.0.0.0` 可被同网段其它机器访问 |
+| `PORT` | `8888` | 监听端口 |
+| `THOUGHTGRAPH_DATA_DIR` | OS 默认数据目录 / `thoughtgraph` | 整个数据目录（DB + exports） |
+| `THOUGHTGRAPH_DB` | `<data_dir>/thoughtgraph.sqlite3` | 单独指定 sqlite 文件位置 |
+| `THOUGHTGRAPH_WEB_SRC` | `<binary>/../web-src` 或 CWD | 静态前端目录 |
+| `DOT_BIN` | 自动查找 | 强制指定 `dot` 二进制路径（Windows 上 PATH 没配置时很有用） |
+
+操作系统默认数据目录：
+
+- Windows: `%APPDATA%\thoughtgraph\`
+- Linux:   `~/.local/share/thoughtgraph/`
+- macOS:   `~/Library/Application Support/thoughtgraph/`（注意：与桌面版的
+  `com.chanshunli.thoughtgraph/` 不是同一个目录，避免冲突；如需共用同一份数据，
+  设 `THOUGHTGRAPH_DB` 指向桌面版的 sqlite 文件即可）
+
+### 8.4 HTTP 接口
+
+单端点 `POST /api/invoke`：
+
+```bash
+curl -X POST http://127.0.0.1:8888/api/invoke \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"create_graph","args":{"name":"demo","description":""}}'
+```
+
+`cmd` 与 `args` 的形状与桌面版 Tauri command 一一对应（参数名是 camelCase）。
+渲染 / 导出类命令在响应里额外返回 `url` 字段（如 `/exports/demo.gv`），浏览器
+直接打开即可下载。所有命令列表见 `web-server/src/main.rs` 中的 `dispatch` 函数。
+
+### 8.5 Windows 一键跑
+
+1. 装 Rust：<https://rustup.rs>
+2. 装 GraphViz：<https://graphviz.org/download/>，安装时勾选"Add to PATH"
+3. `git clone` 本仓库
+4. 在仓库根目录执行：
+
+   ```cmd
+   cargo run -p thoughtgraph-web --release
+   ```
+
+5. 浏览器打开 `http://127.0.0.1:8888`
+
+如果 `dot` 不在 PATH，加一个环境变量再跑：
+
+```cmd
+set DOT_BIN=C:\Program Files\Graphviz\bin\dot.exe
+cargo run -p thoughtgraph-web --release
+```
+
+---
+
+## 9. MCP server（图记忆中心）
 
 `mcp-server/` 是一个独立的 Rust 二进制，把同一个 SQLite 数据库暴露为
 **Model Context Protocol** server，让 Claude Desktop 当作长期记忆来用：
@@ -215,6 +323,6 @@ cargo build -p thoughtgraph-mcp --release
 
 详见 [`mcp-server/README.md`](./mcp-server/README.md)。
 
-## 9. License
+## 10. License
 
 MIT
