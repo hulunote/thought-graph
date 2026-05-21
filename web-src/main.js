@@ -135,12 +135,54 @@ function getViz() {
   return _vizInstancePromise;
 }
 
+// Viz.js (WASM graphviz) has no access to the system's CJK fonts, so it
+// estimates Chinese/Japanese/Korean glyphs using Latin metrics — about half
+// their actual rendered width. Even ASCII underestimates here, because the
+// DOT requests `fontname=STHeiti` and the browser falls back to a CJK font
+// whose Latin glyphs are wider than Viz.js's internal Helvetica estimate.
+// The result: node boxes come out too narrow, and the browser paints the
+// real glyphs spilling out the sides. Server DOT stays unchanged (the
+// desktop `dot` binary with STHeiti measures correctly); we only widen
+// for the in-browser renderer.
+//
+// We inject `width=`/`height=` per node — interpreted as MIN size when
+// fixedsize=false (graphviz's default) — sized from a CJK-aware char count.
+function widenCjkLabelsForViz(dot) {
+  return dot.replace(
+    /^([ \t]*)(n\d+|graph_root)([ \t]*)\[([^\]]*)\]/gm,
+    (match, indent, nodeId, sp, attrs) => {
+      if (/\bwidth\s*=/.test(attrs)) return match;
+      const labelMatch = attrs.match(/\blabel="((?:[^"\\]|\\.)*)"/);
+      if (!labelMatch) return match;
+      const lines = labelMatch[1].split("\\n");
+      let maxLineWidth = 0;
+      for (const raw of lines) {
+        const text = raw.replace(/\\(.)/g, "$1");
+        let w = 0;
+        for (const ch of text) {
+          const cp = ch.codePointAt(0);
+          const wide =
+            (cp >= 0x2e80 && cp <= 0x9fff) ||   // CJK Radicals → Unified Ideographs
+            (cp >= 0xac00 && cp <= 0xd7af) ||   // Hangul Syllables
+            (cp >= 0xff00 && cp <= 0xffef) ||   // Halfwidth/Fullwidth Forms
+            (cp >= 0x3000 && cp <= 0x303f);     // CJK Symbols and Punctuation
+          w += wide ? 0.18 : 0.11;
+        }
+        if (w > maxLineWidth) maxLineWidth = w;
+      }
+      const widthIn = (maxLineWidth + 0.4).toFixed(2);
+      const heightIn = (lines.length * 0.28 + 0.3).toFixed(2);
+      return `${indent}${nodeId}${sp}[${attrs.trim()}, width=${widthIn}, height=${heightIn}]`;
+    },
+  );
+}
+
 // Render a DOT source string and open it in a new tab as an SVG document.
 // The new tab is suitable for browser File → Print → Save as PDF.
 async function renderDotInNewTab(dot, titleHint) {
   const viz = await getViz();
   // renderString throws on malformed DOT; let it propagate so the caller can alert().
-  const svg = viz.renderString(dot, { format: "svg" });
+  const svg = viz.renderString(widenCjkLabelsForViz(dot), { format: "svg" });
   // Wrap in a minimal HTML doc so the SVG fills the viewport and is printable.
   const safeTitle = (titleHint || "ThoughtGraph").replace(/[<>&]/g, "");
   const doc = `<!doctype html><html><head><meta charset="utf-8"><title>${safeTitle}</title>
