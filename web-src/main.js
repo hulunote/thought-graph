@@ -166,12 +166,15 @@ function widenCjkLabelsForViz(dot) {
             (cp >= 0xac00 && cp <= 0xd7af) ||   // Hangul Syllables
             (cp >= 0xff00 && cp <= 0xffef) ||   // Halfwidth/Fullwidth Forms
             (cp >= 0x3000 && cp <= 0x303f);     // CJK Symbols and Punctuation
-          w += wide ? 0.18 : 0.11;
+          w += wide ? 0.18 : 0.10;
         }
         if (w > maxLineWidth) maxLineWidth = w;
       }
-      const widthIn = (maxLineWidth + 0.4).toFixed(2);
-      const heightIn = (lines.length * 0.28 + 0.3).toFixed(2);
+      // Pad just enough for the rounded corner; this matches graphviz's own
+      // default node margin (0.11,0.055) so boxes hug the text instead of
+      // floating in whitespace.
+      const widthIn = (maxLineWidth + 0.15).toFixed(2);
+      const heightIn = (lines.length * 0.21 + 0.1).toFixed(2);
       return `${indent}${nodeId}${sp}[${attrs.trim()}, width=${widthIn}, height=${heightIn}]`;
     },
   );
