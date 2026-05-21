@@ -419,7 +419,6 @@ def _wrap_label(s: str, width: int = WRAP_WIDTH) -> str:
 def render_dot(graph_name: str, nodes: list[dict], edges: list[dict]) -> str:
     out = []
     out.append(f'digraph "{_escape_label(graph_name)}" {{\n')
-    out.append("  rankdir=LR;\n")
     out.append('  graph [splines=true, overlap=false, bgcolor="#fafafa"];\n')
     out.append(
         f'  node  [shape=box, style="rounded,filled", fillcolor="#ffffff", color="#888888", fontname="{FONT}", fontsize=11];\n'
@@ -470,7 +469,6 @@ def render_paths_dot(graph_name: str, paths: list[dict]) -> str:
         start_id = end_id = -1
 
     out = [f'digraph "paths · {_escape_label(graph_name)}" {{\n']
-    out.append("  rankdir=LR;\n")
     out.append('  graph [splines=true, overlap=false, bgcolor="#fafafa"];\n')
     out.append(
         f'  node  [shape=box, style="rounded,filled", fillcolor="#ffffff", color="#888888", fontname="{FONT}", fontsize=11];\n'
