@@ -135,6 +135,57 @@ function getViz() {
   return _vizInstancePromise;
 }
 
+// Server's wrap_label hard-breaks long tokens at exactly this many chars.
+// A line at (or one shy of) this length followed by URL-safe chars is almost
+// certainly a wrap-continuation, not a deliberate newline in user content.
+const SERVER_WRAP_WIDTH = 16;
+
+// Collapse `https://xlisp.gi\nthub.io/posts/co\nmpression-is-int\nelligence.html`
+// (server-wrapped URL fragments) back into one line, then shorten to
+// `https://host/…`. Unrelated lines (e.g. a trailing "url" annotation) are
+// preserved untouched.
+function compactUrlsInLabel(labelText) {
+  const lines = labelText.split("\\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const decoded = lines[i].replace(/\\(.)/g, "$1");
+    if (/^https?:\/\//.test(decoded)) {
+      let url = decoded;
+      let j = i + 1;
+      while (j < lines.length) {
+        const prevRaw = lines[j - 1].replace(/\\(.)/g, "$1");
+        const nextRaw = lines[j].replace(/\\(.)/g, "$1");
+        const wasHardWrap =
+          prevRaw.length >= SERVER_WRAP_WIDTH - 1 && !prevRaw.endsWith(" ");
+        const looksUrlish = /^[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;%=\-]+$/.test(nextRaw);
+        if (wasHardWrap && looksUrlish) {
+          url += nextRaw;
+          j++;
+        } else {
+          break;
+        }
+      }
+      out.push(shortenUrl(url));
+      i = j;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
+  }
+  return out.join("\\n");
+}
+
+function shortenUrl(url) {
+  const m = url.match(/^(https?:\/\/)([^\/?#]+)([\/?#].*)?$/);
+  if (!m) return url;
+  const [, proto, host, rest] = m;
+  if (!rest || rest === "/" || (proto + host + rest).length <= 24) {
+    return proto + host + (rest || "");
+  }
+  return `${proto}${host}/…`;
+}
+
 // Viz.js (WASM graphviz) has no access to the system's CJK fonts, so it
 // estimates Chinese/Japanese/Korean glyphs using Latin metrics — about half
 // their actual rendered width. Even ASCII underestimates here, because the
@@ -145,8 +196,11 @@ function getViz() {
 // desktop `dot` binary with STHeiti measures correctly); we only widen
 // for the in-browser renderer.
 //
-// We inject `width=`/`height=` per node — interpreted as MIN size when
-// fixedsize=false (graphviz's default) — sized from a CJK-aware char count.
+// We also collapse server-wrapped URLs into a compact `proto://host/…` form
+// so they don't dominate the layout.
+//
+// width/height attrs are interpreted as MIN size when fixedsize=false
+// (graphviz's default); we size them from a CJK-aware char count.
 function widenCjkLabelsForViz(dot) {
   return dot.replace(
     /^([ \t]*)(n\d+|graph_root)([ \t]*)\[([^\]]*)\]/gm,
@@ -154,7 +208,8 @@ function widenCjkLabelsForViz(dot) {
       if (/\bwidth\s*=/.test(attrs)) return match;
       const labelMatch = attrs.match(/\blabel="((?:[^"\\]|\\.)*)"/);
       if (!labelMatch) return match;
-      const lines = labelMatch[1].split("\\n");
+      const compacted = compactUrlsInLabel(labelMatch[1]);
+      const lines = compacted.split("\\n");
       let maxLineWidth = 0;
       for (const raw of lines) {
         const text = raw.replace(/\\(.)/g, "$1");
@@ -175,7 +230,10 @@ function widenCjkLabelsForViz(dot) {
       // floating in whitespace.
       const widthIn = (maxLineWidth + 0.15).toFixed(2);
       const heightIn = (lines.length * 0.21 + 0.1).toFixed(2);
-      return `${indent}${nodeId}${sp}[${attrs.trim()}, width=${widthIn}, height=${heightIn}]`;
+      const newAttrs = compacted !== labelMatch[1]
+        ? attrs.replace(/\blabel="(?:[^"\\]|\\.)*"/, `label="${compacted}"`)
+        : attrs;
+      return `${indent}${nodeId}${sp}[${newAttrs.trim()}, width=${widthIn}, height=${heightIn}]`;
     },
   );
 }
