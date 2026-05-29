@@ -821,6 +821,163 @@ for (const id of ["#from-input", "#to-input"]) {
 }
 
 // ============================================================================
+// backup & versions
+// ============================================================================
+//
+// "Backup now" writes every graph as an outline file into
+// ~/Documents/my-thoughtgraph and git-commits it. Restoring a version
+// re-imports its outlines as NEW graphs (never overwrites existing ones).
+
+let backupSelectedHash = null;
+
+function setBackupStatus(msg, cls = "") {
+  const el = $("#backup-status");
+  el.textContent = msg || "";
+  el.className = "backup-status muted" + (cls ? " " + cls : "");
+}
+
+function openBackup() {
+  $("#backup-overlay").classList.remove("hidden");
+  setBackupStatus("");
+  refreshBackupHistory();
+}
+function closeBackup() {
+  $("#backup-overlay").classList.add("hidden");
+}
+
+async function refreshBackupHistory(selectFirst = false) {
+  const ul = $("#backup-history");
+  let commits = [];
+  try {
+    commits = await invoke("backup_history", { limit: 100 });
+  } catch (e) {
+    ul.innerHTML = `<li class="empty">${escapeHtml(String(e))}</li>`;
+    return;
+  }
+  if (!commits.length) {
+    ul.innerHTML = `<li class="empty">No backups yet. Click <b>Backup now</b>.</li>`;
+    $("#backup-detail").innerHTML = `<p class="muted" style="padding:12px">No versions yet.</p>`;
+    return;
+  }
+  ul.innerHTML = commits.map((c) => `
+    <li data-hash="${c.hash}">
+      <div class="bk-date">${escapeHtml(fmtDate(c.date))}</div>
+      <div class="bk-msg">${escapeHtml(c.message)}</div>
+    </li>`).join("");
+  for (const li of ul.querySelectorAll("li[data-hash]")) {
+    li.onclick = () => {
+      ul.querySelectorAll("li").forEach((x) => x.classList.remove("active"));
+      li.classList.add("active");
+      showBackupCommit(li.dataset.hash);
+    };
+  }
+  // auto-open the most recent (or keep current selection)
+  const target = (selectFirst || !backupSelectedHash)
+    ? commits[0].hash
+    : (commits.find((c) => c.hash === backupSelectedHash)?.hash || commits[0].hash);
+  const targetLi = ul.querySelector(`li[data-hash="${target}"]`);
+  if (targetLi) { targetLi.classList.add("active"); showBackupCommit(target); }
+}
+
+async function showBackupCommit(hash) {
+  backupSelectedHash = hash;
+  const box = $("#backup-detail");
+  box.innerHTML = `<p class="muted" style="padding:12px">Loading…</p>`;
+  let detail;
+  try {
+    detail = await invoke("backup_commit_detail", { hash });
+  } catch (e) {
+    box.innerHTML = `<p class="muted" style="padding:12px">${escapeHtml(String(e))}</p>`;
+    return;
+  }
+  const filesHtml = detail.files.length
+    ? detail.files.map((f) =>
+        `<div class="bk-file-name">${escapeHtml(f.path)}</div><pre>${escapeHtml(f.content)}</pre>`).join("")
+    : `<p class="muted">This version has no graph files.</p>`;
+  box.innerHTML = `
+    <div class="bk-detail-head">
+      <div class="bk-stat">${escapeHtml(detail.files.length + " graph file(s) in this version")}</div>
+      <button id="bk-restore" class="primary">↺ Restore as new graphs</button>
+    </div>
+    ${filesHtml}
+  `;
+  const btn = box.querySelector("#bk-restore");
+  if (btn) btn.onclick = () => restoreBackupVersion(detail);
+}
+
+// Build a brand-new graph from one outline file. The `# heading` becomes the
+// graph name; its descendants become the node tree. Non-destructive.
+async function createGraphFromOutline(text, suffix) {
+  const items = parseOutline(text);
+  if (!items.length) return null;
+  const titleIdx = items.findIndex((it) => it.parentIndex == null);
+  const baseName = titleIdx >= 0 ? items[titleIdx].text : "Restored";
+  const name = `${baseName} ${suffix}`.trim();
+  const g = await invoke("create_graph", { name, description: "" });
+  const createdIds = [];            // item index → node id (null for the title)
+  for (let i = 0; i < items.length; i++) {
+    if (i === titleIdx) { createdIds.push(null); continue; }
+    const it = items[i];
+    // children of the title become roots; everything else keeps its parent
+    const parentId = (it.parentIndex == null || it.parentIndex === titleIdx)
+      ? null : createdIds[it.parentIndex];
+    const node = await createNodeAuto(g.id, it.text, parentId ?? null);
+    createdIds.push(node.id);
+  }
+  return g;
+}
+
+async function restoreBackupVersion(detail) {
+  const files = (detail.files || []).filter((f) => f.path.endsWith(".md"));
+  if (!files.length) { setBackupStatus("Nothing to restore in this version.", "err"); return; }
+  if (!confirm(`Restore ${files.length} graph(s) from this version as NEW graphs? Your current graphs stay untouched.`)) return;
+  const suffix = `(restored ${new Date().toLocaleDateString()})`;
+  setBackupStatus("Restoring…");
+  let last = null, count = 0;
+  try {
+    for (const f of files) {
+      const g = await createGraphFromOutline(f.content, suffix);
+      if (g) { last = g; count++; }
+    }
+  } catch (e) { setBackupStatus(String(e), "err"); return; }
+  await loadGraphs();
+  closeBackup();
+  if (last) await selectGraph(last.id);
+  setBackupStatus("");
+  alert(`Restored ${count} graph(s) as new graphs.`);
+}
+
+$("#open-backup").onclick = openBackup;
+$("#backup-close").onclick = closeBackup;
+$("#backup-overlay").addEventListener("click", (e) => {
+  if (e.target.id === "backup-overlay") closeBackup();   // click backdrop to close
+});
+$("#backup-open-folder").onclick = async () => {
+  try { await invoke("open_backup_dir"); }
+  catch (e) { setBackupStatus(String(e), "err"); }
+};
+$("#backup-now").onclick = async () => {
+  const btn = $("#backup-now");
+  btn.disabled = true;
+  setBackupStatus("Backing up…");
+  try {
+    const r = await invoke("backup_now");
+    setBackupStatus(
+      r.committed
+        ? `✓ ${r.message}  ·  ${r.path}`
+        : `${r.message}  ·  ${r.path}`,
+      "ok",
+    );
+    backupSelectedHash = r.hash || backupSelectedHash;
+    await refreshBackupHistory(true);
+  } catch (e) {
+    setBackupStatus(String(e), "err");
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+// ============================================================================
 // boot
 // ============================================================================
 

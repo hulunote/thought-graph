@@ -1,3 +1,4 @@
+pub mod backup;
 mod commands;
 pub mod db;
 pub mod graph;
@@ -45,6 +46,10 @@ pub fn run() {
             commands::search_nodes,
             commands::render_paths_and_open,
             commands::render_paths_by_keyword_and_open,
+            commands::backup_now,
+            commands::backup_history,
+            commands::backup_commit_detail,
+            commands::open_backup_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

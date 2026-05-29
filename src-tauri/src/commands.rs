@@ -1,3 +1,4 @@
+use crate::backup::{self, BackupResult, Commit, CommitDetail};
 use crate::db::{self, DbState, Edge, Graph, Node};
 use crate::graph::{self, PathHit, RenderResult};
 use std::path::PathBuf;
@@ -314,4 +315,33 @@ pub fn search_nodes(
 ) -> Result<Vec<db::SearchHit>, String> {
     let conn = state.conn.lock().map_err(err)?;
     db::search_nodes(&conn, &query, graph_id, limit.unwrap_or(30)).map_err(err)
+}
+
+// ----- backup (git-versioned outline export) -----
+
+#[tauri::command]
+pub fn backup_now(state: State<'_, DbState>) -> Result<BackupResult, String> {
+    let conn = state.conn.lock().map_err(err)?;
+    backup::backup_now(&conn).map_err(err)
+}
+
+#[tauri::command]
+pub fn backup_history(limit: Option<usize>) -> Result<Vec<Commit>, String> {
+    backup::history(limit.unwrap_or(100)).map_err(err)
+}
+
+#[tauri::command]
+pub fn backup_commit_detail(hash: String) -> Result<CommitDetail, String> {
+    backup::commit_detail(&hash).map_err(err)
+}
+
+#[tauri::command]
+pub fn open_backup_dir() -> Result<String, String> {
+    let dir = backup::backup_dir();
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    std::process::Command::new("open")
+        .arg(&dir)
+        .status()
+        .map_err(err)?;
+    Ok(dir.to_string_lossy().into_owned())
 }

@@ -27,6 +27,7 @@
             <p id="graph-desc" class="muted"></p>
           </div>
           <div class="toolbar">
+            <button id="open-backup" title="Backup & version history">Backup</button>
             <button id="rename-graph">Rename</button>
             <button id="export-gv">Export .gv</button>
             <button id="render-pdf">Render → PDF</button>
@@ -76,6 +77,32 @@
           </div>
         </section>
       </main>
+    </div>
+
+    <!-- backup & versions overlay -->
+    <div id="backup-overlay" class="overlay hidden">
+      <div class="overlay-card">
+        <div class="overlay-head">
+          <h3>Backup &amp; versions</h3>
+          <div class="overlay-head-actions">
+            <button id="backup-now" class="primary">⤓ Backup now</button>
+            <button id="backup-open-folder">Open folder</button>
+            <button id="backup-close">Close</button>
+          </div>
+        </div>
+        <div id="backup-status" class="backup-status muted"></div>
+        <div class="backup-body">
+          <div class="backup-history-pane">
+            <div class="backup-pane-head">Version history</div>
+            <ul id="backup-history" class="backup-history"></ul>
+          </div>
+          <div class="backup-detail-pane">
+            <div id="backup-detail" class="backup-detail">
+              <p class="muted" style="padding:12px">Pick a version on the left to view its outline snapshot.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- modal -->
