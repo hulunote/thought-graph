@@ -1,6 +1,6 @@
 [package]
 name = "graphviz-comment-reply"
-version = "0.1.0"
+version = "0.1.1"
 description = "A thinking tool — graphs of comments and replies, rendered with GraphViz"
 authors = ["chanshunli"]
 edition = "2021"
