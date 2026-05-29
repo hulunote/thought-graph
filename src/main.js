@@ -24,8 +24,11 @@ const state = {
   nodes: [],
   edges: [],
   selectedNodeId: null,
-  searchHits: null,    // null = not searching, [] = no hits, [...] = hits
+  searchHits: null,    // null = not searching, [] = no hits, [id,...] = matching node ids (tree order)
   searchQuery: "",
+  searchCursor: -1,    // index into searchHits for Enter-cycling (browser-find style)
+  collapsed: new Set(),// node ids whose reply-children are hidden (outline collapse)
+  index: null,         // last buildTreeIndex() result (for scroll / ancestor expansion)
 };
 
 // Persisted UI flags
@@ -228,6 +231,8 @@ async function selectGraph(id) {
   state.selectedNodeId = null;
   state.searchHits = null;
   state.searchQuery = "";
+  state.searchCursor = -1;
+  state.collapsed = new Set();
   $("#content-search").value = "";
   $("#search-count").textContent = "";
   $("#from-input").value = "";
@@ -269,7 +274,27 @@ function buildTreeIndex() {
     if (p) (children.get(p) || children.set(p, []).get(p)).push(n);
   }
   const roots = state.nodes.filter((n) => !replyParent.has(n.id));
-  return { roots, children, outgoingByFrom };
+  return { roots, children, outgoingByFrom, replyParent };
+}
+
+// Walk reply-parents upward from a node (nearest ancestor first).
+function ancestorsOf(nodeId, replyParent) {
+  const out = [];
+  let p = replyParent.get(nodeId);
+  while (p != null) { out.push(p); p = replyParent.get(p); }
+  return out;
+}
+
+// DFS visit order of node ids, exactly as renderTree lays them out. Used so
+// Enter-cycling through search hits walks top-to-bottom like browser find.
+function treeOrder(roots, children) {
+  const order = [];
+  const visit = (n) => {
+    order.push(n.id);
+    for (const k of children.get(n.id) || []) visit(k);
+  };
+  for (const r of roots) visit(r);
+  return order;
 }
 
 function renderTree() {
@@ -280,8 +305,12 @@ function renderTree() {
     return;
   }
 
-  const { roots, children, outgoingByFrom } = buildTreeIndex();
-  const matchIds = new Set(state.searchHits ? state.searchHits.map((h) => h.node.id) : []);
+  const idx = buildTreeIndex();
+  state.index = idx;
+  const { roots, children, outgoingByFrom } = idx;
+  const matchIds = new Set(state.searchHits || []);
+  const currentMatch = (state.searchHits && state.searchCursor >= 0)
+    ? state.searchHits[state.searchCursor] : null;
   const nodeById = new Map(state.nodes.map((n) => [n.id, n]));
 
   function nodeLi(n) {
@@ -290,10 +319,18 @@ function renderTree() {
     card.className = "node-card";
     if (state.selectedNodeId === n.id) card.classList.add("selected");
     if (matchIds.has(n.id)) card.classList.add("match");
+    if (currentMatch === n.id) card.classList.add("match-current");
 
     const contentHtml = state.searchQuery
       ? highlight(n.content, state.searchQuery)
       : escapeHtml(n.content);
+
+    const kids = children.get(n.id) || [];
+    const isCollapsed = state.collapsed.has(n.id);
+    // Outline disclosure triangle: ▼ expanded, ▶ collapsed, blank spacer for leaves.
+    const toggleHtml = kids.length
+      ? `<button class="tree-toggle" data-node="${n.id}" title="Collapse / expand">${isCollapsed ? "▶" : "▼"}</button>`
+      : `<span class="tree-toggle leaf"></span>`;
 
     const outgoing = outgoingByFrom.get(n.id) || [];
     const edgesHtml = outgoing.length === 0 ? "" : `
@@ -310,6 +347,7 @@ function renderTree() {
 
     card.innerHTML = `
       <div class="node-row">
+        ${toggleHtml}
         <span class="app-id">${escapeHtml(n.app_id)}</span>
         <div class="content-preview collapsed" data-node="${n.id}">${contentHtml}</div>
         <div class="row-actions">
@@ -323,6 +361,15 @@ function renderTree() {
     `;
 
     // wire actions
+    const toggleBtn = card.querySelector(".tree-toggle");
+    if (toggleBtn && kids.length) {
+      toggleBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (state.collapsed.has(n.id)) state.collapsed.delete(n.id);
+        else state.collapsed.add(n.id);
+        renderTree();
+      };
+    }
     card.querySelector(".act-reply").onclick = (e) => { e.stopPropagation(); doReply(n); };
     card.querySelector(".act-ref").onclick   = (e) => { e.stopPropagation(); doAddRef(n); };
     card.querySelector(".act-edit").onclick  = (e) => { e.stopPropagation(); doEdit(n); };
@@ -344,8 +391,7 @@ function renderTree() {
     };
 
     li.appendChild(card);
-    const kids = children.get(n.id) || [];
-    if (kids.length) {
+    if (kids.length && !isCollapsed) {
       const sub = document.createElement("ul");
       for (const k of kids) sub.appendChild(nodeLi(k));
       li.appendChild(sub);
@@ -358,6 +404,9 @@ function renderTree() {
 
 function scrollToNode(nodeId) {
   state.selectedNodeId = nodeId;
+  // Expand every collapsed ancestor so the target is actually rendered.
+  const idx = state.index || buildTreeIndex();
+  for (const a of ancestorsOf(nodeId, idx.replyParent)) state.collapsed.delete(a);
   renderTree();
   // expand the selected card's content
   setTimeout(() => {
@@ -382,8 +431,8 @@ async function doReply(node) {
   if (!r) return;
   try {
     const created = await createNodeAuto(state.currentGraph.id, r.content, node.id);
-    state.selectedNodeId = created.id;
     await reloadNodesAndEdges();
+    scrollToNode(created.id);
   } catch (e) { alert(e); }
 }
 
@@ -494,44 +543,160 @@ $("#new-root").onclick = async () => {
   if (!r) return;
   try {
     const created = await createNodeAuto(state.currentGraph.id, r.content, null);
-    state.selectedNodeId = created.id;
     await reloadNodesAndEdges();
+    scrollToNode(created.id);
   } catch (e) { alert(e); }
 };
 
 // ============================================================================
-// content search (FTS5 with space = AND)
+// import outline (Markdown headings + indented bullets → node tree)
+// ============================================================================
+//
+// Parses an outline like:
+//   # Title
+//   _Article: foo_
+//   - > "quote"
+//     - child a
+//       - grandchild
+// into a tree of nodes linked by `reply` edges. Indentation depth defines
+// nesting; `#` headings become top-level roots that bullets nest under.
+
+function parseOutline(text) {
+  // Phase 1: raw items with an "effective indent". Headings get indent -1 so any
+  // following content (indent ≥ 0) nests beneath the most recent heading.
+  const raw = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let m;
+    if ((m = line.match(/^\s*(#+)\s+(.*)$/))) {
+      raw.push({ indent: -1, text: m[2].trim() });
+    } else if ((m = line.match(/^(\s*)[-*+]\s+(.*)$/))) {
+      let t = m[2].trim().replace(/^>\s*/, "");   // drop a leading blockquote marker
+      raw.push({ indent: m[1].length, text: t });
+    } else {
+      const lead = line.match(/^(\s*)/)[1].length;
+      raw.push({ indent: lead, text: line.trim() });
+    }
+  }
+  // Phase 2: assign parents via an indent stack (nearest shallower ancestor).
+  const items = [];           // { text, parentIndex }
+  const stack = [];           // { indent, itemIndex }
+  for (const r of raw) {
+    while (stack.length && stack[stack.length - 1].indent >= r.indent) stack.pop();
+    const parentIndex = stack.length ? stack[stack.length - 1].itemIndex : null;
+    const itemIndex = items.length;
+    items.push({ text: r.text, parentIndex });
+    stack.push({ indent: r.indent, itemIndex });
+  }
+  return items;
+}
+
+async function importOutlineText(text) {
+  const items = parseOutline(text);
+  if (!items.length) { alert("Nothing to import — the outline is empty."); return; }
+  const createdIds = [];      // parallel to items: itemIndex → created node id
+  let first = null;
+  for (const it of items) {
+    const parentId = it.parentIndex == null ? null : createdIds[it.parentIndex];
+    const node = await createNodeAuto(state.currentGraph.id, it.text, parentId ?? null);
+    createdIds.push(node.id);
+    if (first == null) first = node.id;
+  }
+  await reloadNodesAndEdges();
+  if (first != null) scrollToNode(first);
+}
+
+$("#import-outline").onclick = async () => {
+  if (!state.currentGraph) { alert("Pick or create a graph first."); return; }
+  const div = document.createElement("div");
+  div.innerHTML = `
+    <label>Outline (Markdown — headings &amp; indented bullets)
+      <textarea id="cm-outline" rows="14" placeholder="# Title&#10;- top level&#10;  - child&#10;    - grandchild"></textarea>
+    </label>
+    <small class="muted">Indentation defines nesting; each line becomes a node linked by reply edges.</small>
+  `;
+  const r = await modal({
+    title: "Import outline",
+    body: div,
+    okLabel: "Import",
+    onValidate() {
+      const v = div.querySelector("#cm-outline").value;
+      if (!v.trim()) return false;
+      return { text: v };
+    },
+  });
+  if (!r) return;
+  try { await importOutlineText(r.text); }
+  catch (e) { alert(e); }
+};
+
+// ============================================================================
+// content search (client-side substring, space = AND)
 // ============================================================================
 
-const runSearch = debounce(async () => {
+// In-tree search is done entirely client-side with case-insensitive substring
+// matching (space = AND). This keeps the hit count, the yellow highlight, and
+// Enter-navigation perfectly in sync — the FTS5 path used to disagree with the
+// substring highlighter (e.g. CJK runs tokenized as one word reported 0 matches
+// while text was still highlighted).
+function computeMatches(q) {
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const idx = state.index || buildTreeIndex();
+  const order = treeOrder(idx.roots, idx.children);
+  const nodeById = new Map(state.nodes.map((n) => [n.id, n]));
+  const hits = [];
+  for (const id of order) {
+    const n = nodeById.get(id);
+    if (!n) continue;
+    const hay = (n.app_id + " " + n.content).toLowerCase();
+    if (terms.every((t) => hay.includes(t))) hits.push(id);
+  }
+  return hits;
+}
+
+function updateSearchCount() {
+  const el = $("#search-count");
+  const hits = state.searchHits;
+  if (!hits) { el.textContent = ""; return; }
+  if (!hits.length) { el.textContent = "0 matches"; return; }
+  const pos = state.searchCursor >= 0 ? `${state.searchCursor + 1}/` : "";
+  el.textContent = `${pos}${hits.length} match${hits.length === 1 ? "" : "es"}`;
+}
+
+const runSearch = debounce(() => {
   if (!state.currentGraph) return;
   const q = $("#content-search").value.trim();
   state.searchQuery = q;
   if (!q) {
     state.searchHits = null;
-    $("#search-count").textContent = "";
+    state.searchCursor = -1;
+    updateSearchCount();
     renderTree();
     return;
   }
-  try {
-    const hits = await invoke("search_nodes", {
-      graphId: state.currentGraph.id,
-      query: q,
-      limit: 100,
-    });
-    state.searchHits = hits;
-    $("#search-count").textContent = `${hits.length} match${hits.length === 1 ? "" : "es"}`;
-    renderTree();
-    // auto-scroll to first match
-    if (hits.length) scrollToNode(hits[0].node.id);
-  } catch (e) {
-    state.searchHits = [];
-    $("#search-count").textContent = `error: ${e}`;
-    renderTree();
-  }
+  const hits = computeMatches(q);
+  state.searchHits = hits;
+  state.searchCursor = hits.length ? 0 : -1;
+  updateSearchCount();
+  renderTree();
+  if (hits.length) scrollToNode(hits[0]);   // jump to first match (browser-find style)
 }, 150);
 
 $("#content-search").oninput = runSearch;
+
+// Enter cycles to the next match (Shift+Enter to the previous), wrapping around
+// — like pressing Enter repeatedly in a browser's in-page find.
+$("#content-search").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  const hits = state.searchHits;
+  if (!hits || !hits.length) return;
+  const step = e.shiftKey ? -1 : 1;
+  state.searchCursor = (state.searchCursor + step + hits.length) % hits.length;
+  updateSearchCount();
+  scrollToNode(hits[state.searchCursor]);
+});
 
 // ============================================================================
 // export / render
